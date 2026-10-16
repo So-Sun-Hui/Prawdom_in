@@ -1,0 +1,18 @@
+[general]
+name=Prawdom_in
+qgisMinimumVersion=3.28
+qgisMaximumVersion=3.99
+description=Import residential floor areas from Prawdom and OpenStreetMap context for a selected Moscow study area
+about=Draw a rectangle or use selected polygons to match OSM residential addresses to public Prawdom house cards. Import residential floor area and coordinates into persistent styled GeoPackage layers with source URLs and a JSON journal. Residents are estimated from floor area divided by a configurable norm (default 18 square metres), not census data. Automatic lookup is limited to Moscow; direct house and street URLs are supported.
+version=1.4.4.7
+author=Só-Sun Hui
+email=corporate@k-a-d-o-d-e.com
+repository=https://github.com/So-Sun-Hui/Prawdom_in
+category=Vector
+experimental=True
+hasProcessingProvider=False
+icon=icon.svg
+tags=moscow,prawdom,population,openstreetmap,residential
+changelog=Initial public submission candidate. Selection-based import, persistent GeoPackage output and native QGIS checks.
+homepage=https://github.com/So-Sun-Hui/Prawdom_in#readme
+tracker=https://github.com/So-Sun-Hui/Prawdom_in/issues
