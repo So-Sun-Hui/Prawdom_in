@@ -36,6 +36,8 @@ Tested with QGIS 3.42.1 on macOS: native ZIP installation and launch, empty-area
 
 Offline stress checks used 839 cached real cards, 10,000 duplicate URLs and 10,000 synthetic output rows. Verified clipping, multipolygon holes, persistent GeoPackage reopening and cancellation. These are not 10,000 live website requests. Other operating systems and QGIS versions have not yet been tested.
 
+Security hardening: XML DTD/entity declarations are rejected. HTTPS source hosts, paths and redirects are validated before connecting. Regression checks rejected DTD/XXE payloads and forbidden redirects, and parsed 12,244 elements from a cached real OSM response.
+
 ## License
 
 Plugin code: GNU GPL version 2 or later. See LICENSE. No external Python dependencies beyond QGIS are required.

@@ -2,14 +2,12 @@
 """Network and parsing code; standard library only, independent of QGIS."""
 import hashlib
 import html
-import json
-import math
+import http.client
 import re
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
+from pyexpat import ParserCreate
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -21,6 +19,59 @@ CITY = 'https://prawdom.ru/k_city.php?d=99100&c=547099006&f='
 
 class Cancelled(Exception):
     pass
+
+def source_url(url):
+    """Validate before connecting, including every redirect and cache lookup."""
+    parsed = urllib.parse.urlsplit(url)
+    paths = {
+        'prawdom.ru': {'/dom.php', '/nsk.php', '/k_city.php'},
+        'www.prawdom.ru': {'/dom.php', '/nsk.php', '/k_city.php'},
+        'api.openstreetmap.org': {'/api/0.6/map'},
+    }
+    if (parsed.scheme != 'https' or parsed.hostname not in paths
+            or parsed.port not in (None, 443) or parsed.username is not None
+            or parsed.password is not None or parsed.fragment
+            or parsed.path not in paths.get(parsed.hostname, set())):
+        raise ValueError('Разрешены только HTTPS-адреса источников Prawdom и OSM.')
+    return parsed
+
+class OsmElement:
+    def __init__(self, tag, attributes):
+        self.tag, self.attrib, self.children = tag, attributes, []
+    def findall(self, tag):
+        return [child for child in self.children if child.tag == tag]
+
+def parse_osm_xml(raw):
+    """Read only OSM elements; reject DTDs, entities and unexpected nesting."""
+    if len(raw) > 45 * 1024 * 1024:
+        raise ValueError('Слишком большой XML-ответ.')
+    parser = ParserCreate()
+    elements, state = [], {'depth': 0, 'current': None}
+    def reject(*args):
+        raise ValueError('DTD и объявления сущностей в XML запрещены.')
+    def start(tag, attrs):
+        state['depth'] += 1
+        depth = state['depth']
+        if depth > 4 or (depth == 1 and tag != 'osm'):
+            raise ValueError('Некорректная структура OSM XML.')
+        if depth == 2 and tag in ('node', 'way', 'relation'):
+            state['current'] = OsmElement(tag, attrs)
+        elif depth == 3 and state['current'] is not None:
+            if tag in ('tag', 'nd', 'member'):
+                state['current'].children.append(OsmElement(tag, attrs))
+    def end(tag):
+        if state['depth'] == 2 and state['current'] is not None:
+            elements.append(state['current'])
+            state['current'] = None
+        state['depth'] -= 1
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.StartDoctypeDeclHandler = reject
+    parser.EntityDeclHandler = reject
+    parser.ExternalEntityRefHandler = reject
+    parser.SetParamEntityParsing(0)
+    parser.Parse(raw, True)
+    return elements
 
 class Document(HTMLParser):
     def __init__(self, source):
@@ -110,18 +161,45 @@ class Client:
             raise Cancelled('Импорт отменён.')
     def get(self, url, ttl=86400):
         self.check()
+        source_url(url)
         path = self.cache / (hashlib.sha256(url.encode()).hexdigest() + '.bin')
         if path.exists() and time.time() - path.stat().st_mtime < ttl:
             data, stamp = path.read_bytes(), path.stat().st_mtime
         else:
             while time.monotonic() - self.last < self.interval:
                 self.check(); time.sleep(.05)
-            req = urllib.request.Request(url, headers={'User-Agent':'Prawdom_in/1.4.4.7 (local QGIS importer)'})
-            with urllib.request.urlopen(req, timeout=40) as response:
-                target = urllib.parse.urlsplit(response.geturl())
-                if target.scheme != 'https' or target.hostname not in ('prawdom.ru','www.prawdom.ru','api.openstreetmap.org'):
-                    raise ValueError('Неожиданное перенаправление источника.')
-                data = response.read(45 * 1024 * 1024 + 1)
+            target_url = url
+            for redirect in range(6):
+                self.check()
+                target = source_url(target_url)
+                connection = http.client.HTTPSConnection(target.hostname, timeout=40)
+                try:
+                    resource = target.path + ('?' + target.query if target.query else '')
+                    connection.request('GET', resource, headers={'User-Agent': 'Prawdom_in/1.4.4.7 (local QGIS importer)'})
+                    response = connection.getresponse()
+                    if response.status in (301, 302, 303, 307, 308):
+                        location = response.getheader('Location')
+                        if not location or redirect == 5:
+                            raise ValueError('Некорректное перенаправление источника.')
+                        target_url = urllib.parse.urljoin(target_url, location)
+                        source_url(target_url)
+                        continue
+                    if response.status != 200:
+                        raise urllib.error.HTTPError(target_url, response.status, response.reason, response.headers, None)
+                    chunks, size = [], 0
+                    while True:
+                        self.check()
+                        chunk = response.read(65536)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > 45 * 1024 * 1024:
+                            raise ValueError('Слишком большой ответ. Выберите меньшую область.')
+                        chunks.append(chunk)
+                    data = b''.join(chunks)
+                    break
+                finally:
+                    connection.close()
             self.last = time.monotonic()
             if len(data) > 45*1024*1024:
                 raise ValueError('Слишком большой ответ. Выберите меньшую область.')
@@ -145,7 +223,7 @@ def osm_download(client, bbox, progress=lambda text:None):
             x0,y0,x1,y1=b;xm=(x0+x1)/2;ym=(y0+y1)/2
             for sub in [(x0,y0,xm,ym),(xm,y0,x1,ym),(x0,ym,xm,y1),(xm,ym,x1,y1)]:tile(sub,depth+1)
             return
-        root = ET.fromstring(raw)
+        root = parse_osm_xml(raw)
         for item in root:
             if item.tag in ('node','way','relation'):
                 elements[(item.tag,int(item.attrib['id']))] = item

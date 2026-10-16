@@ -108,8 +108,8 @@ def geometry(record):
     return g
 
 def memory(kind,name,fields):
-    l=QgsVectorLayer(kind+'?crs=EPSG:32637',name,'memory')
-    l.dataProvider().addAttributes([QgsField(n,t) for n,t in fields]);l.updateFields();return l
+    layer=QgsVectorLayer(kind+'?crs=EPSG:32637',name,'memory')
+    layer.dataProvider().addAttributes([QgsField(n,t) for n,t in fields]);layer.updateFields();return layer
 
 def feature(layer,geom,attributes):
     if not geom or geom.isEmpty():return
@@ -175,20 +175,20 @@ def save_result(result, options):
         except Exception:bad+=1
     if area:feature(layers['area'],area,['Выбранная область; не расчётная изохрона'])
     pop=list(layers['population'].getFeatures());counts={'дома':len(pop),'жилая_площадь':sum(f['жилая_площадь'] for f in pop),'жители':sum(f['жители'] for f in pop),'общепит':layers['food'].featureCount(),'магазины':layers['shops'].featureCount(),'за_границей':excluded,'ошибки_карточек':len(result['messages']),'ошибки_геометрий':bad}
-    if not any(l.featureCount() for l in layers.values()):raise ValueError('Нет объектов для сохранения. Проверьте журнал и выбранную область.')
+    if not any(layer.featureCount() for layer in layers.values()):raise ValueError('Нет объектов для сохранения. Проверьте журнал и выбранную область.')
     output=Path(options['output']);output.mkdir(parents=True,exist_ok=True)
     stem='Prawdom_in_'+datetime.now().strftime('%Y%m%d_%H%M%S_%f');path=output/(stem+'.gpkg')
     saved={};first=True
-    for key,l in layers.items():
-        if not l.featureCount():continue
-        l.updateExtents();style(l,key)
-        meta=l.metadata();meta.setTitle(l.name());meta.setAbstract('Prawdom_in 1.4.4.7. '+('Жилая площадь из публичных карточек prawdom.ru; жители = round(жилая_площадь / норма), не перепись. Ссылки и дата получения сохранены для каждого дома.' if key=='population' else '© OpenStreetMap contributors, ODbL. Область исследования задаётся пользователем и не является автоматически рассчитанной изохроной.'));l.setMetadata(meta)
+    for key,layer in layers.items():
+        if not layer.featureCount():continue
+        layer.updateExtents();style(layer,key)
+        meta=layer.metadata();meta.setTitle(layer.name());meta.setAbstract('Prawdom_in 1.4.4.7. '+('Жилая площадь из публичных карточек prawdom.ru; жители = round(жилая_площадь / норма), не перепись. Ссылки и дата получения сохранены для каждого дома.' if key=='population' else '© OpenStreetMap contributors, ODbL. Область исследования задаётся пользователем и не является автоматически рассчитанной изохроной.'));layer.setMetadata(meta)
         opt=QgsVectorFileWriter.SaveVectorOptions();opt.driverName='GPKG';opt.layerName=key;opt.actionOnExistingFile=QgsVectorFileWriter.CreateOrOverwriteFile if first else QgsVectorFileWriter.CreateOrOverwriteLayer
-        answer=QgsVectorFileWriter.writeAsVectorFormatV3(l,str(path),project.transformContext(),opt)
+        answer=QgsVectorFileWriter.writeAsVectorFormatV3(layer,str(path),project.transformContext(),opt)
         if answer[0]!=QgsVectorFileWriter.NoError:raise ValueError('Ошибка записи GeoPackage: '+str(answer))
         first=False
-        q=QgsVectorLayer(str(path)+'|layername='+key,l.name(),'ogr')
-        if not q.isValid():raise ValueError('Не удалось открыть сохранённый слой '+l.name())
+        q=QgsVectorLayer(str(path)+'|layername='+key,layer.name(),'ogr')
+        if not q.isValid():raise ValueError('Не удалось открыть сохранённый слой '+layer.name())
         style(q,key);q.setMetadata(meta);q.saveStyleToDatabase('Prawdom_in','Цвета проекта',True,'');saved[key]=q
     group=project.layerTreeRoot().insertGroup(0,'Prawdom_in · '+datetime.now().strftime('%H:%M:%S'))
     for key in ['population','food','shops','area','buildings','roads','greenery','water']:
@@ -197,7 +197,7 @@ def save_result(result, options):
             if key=='population' and result['elements'] and not options['show_population']:node.setItemVisibilityChecked(False)
     order=[saved[k] for k in ['population','food','shops','area','buildings','roads','greenery','water'] if k in saved]
     tree=project.layerTreeRoot();prior=tree.customLayerOrder() if tree.hasCustomLayerOrder() else tree.layerOrder()
-    tree.setHasCustomLayerOrder(True);tree.setCustomLayerOrder(order+[l for l in prior if l not in order])
+    tree.setHasCustomLayerOrder(True);tree.setCustomLayerOrder(order+[layer for layer in prior if layer not in order])
     report={'plugin':'Prawdom_in 1.4.4.7','created_at':datetime.now().astimezone().isoformat(),'norm_m2':options['norm'],'summary':counts,'messages':result['messages'],'gpkg':path.name,'method':'Жители = округлённая жилая площадь / норма по каждому дому. Подсчёт внутри выбранной области по координатам. Площадь не прошедших сопоставление домов не восстанавливается. Категории POI как в исходном задании; supermarket не включён.'}
     log=output/(stem+'_журнал.json');log.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     return saved,counts,str(path),str(log)
@@ -245,10 +245,10 @@ class ImportDialog(QDialog):
         self.old_tool=self.iface.mapCanvas().mapTool();self.tool=AreaTool(self.iface.mapCanvas(),self.set_area);self.hide();self.iface.mapCanvas().setMapTool(self.tool)
     def canvas_area(self):self.set_area(QgsGeometry.fromRect(self.iface.mapCanvas().extent()),self.iface.mapCanvas().mapSettings().destinationCrs())
     def selected_area(self):
-        l=self.iface.activeLayer()
-        if not isinstance(l,QgsVectorLayer) or l.geometryType()!=QgsWkbTypes.PolygonGeometry or not l.selectedFeatureCount():
+        layer=self.iface.activeLayer()
+        if not isinstance(layer,QgsVectorLayer) or layer.geometryType()!=QgsWkbTypes.PolygonGeometry or not layer.selectedFeatureCount():
             QMessageBox.information(self,'Выделенный полигон','Выделите один или несколько полигонов в активном слое.');return
-        self.set_area(QgsGeometry.unaryUnion([f.geometry() for f in l.getSelectedFeatures()]),l.crs())
+        self.set_area(QgsGeometry.unaryUnion([f.geometry() for f in layer.getSelectedFeatures()]),layer.crs())
     def start(self):
         if self.task:return
         auto=not self.mode.isChecked()

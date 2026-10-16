@@ -13,6 +13,6 @@ experimental=True
 hasProcessingProvider=False
 icon=icon.svg
 tags=moscow,prawdom,population,openstreetmap,residential
-changelog=Initial public submission candidate. Selection-based import, persistent GeoPackage output and native QGIS checks.
+changelog=1.4.4.7: reject XML DTDs and entities; validate HTTPS source hosts, paths and redirects before connecting; remove ambiguous variable names.
 homepage=https://github.com/So-Sun-Hui/Prawdom_in#readme
 tracker=https://github.com/So-Sun-Hui/Prawdom_in/issues
