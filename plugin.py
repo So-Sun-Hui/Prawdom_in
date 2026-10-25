@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 import json
 import math
-import os
-import traceback
 from datetime import datetime
 from pathlib import Path
 
-from qgis.PyQt.QtCore import Qt, QVariant, QStandardPaths, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QFont
-from qgis.PyQt.QtWidgets import (QAction, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QPlainTextEdit, QComboBox, QDoubleSpinBox, QCheckBox, QFileDialog,
+from qgis.PyQt.QtCore import QVariant, QMetaType, QStandardPaths, pyqtSignal
+from qgis.PyQt.QtGui import QAction, QColor, QFont
+from qgis.PyQt.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QPlainTextEdit, QDoubleSpinBox, QCheckBox, QFileDialog,
     QLineEdit, QMessageBox, QProgressBar, QGroupBox)
 from qgis.core import (QgsApplication, QgsTask, QgsProject, QgsGeometry,
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY,
@@ -21,11 +19,31 @@ from .core import Client, Cancelled, osm_download, address_links, collect, FOOD,
 
 CREDIT = 'made for personal and public use, 2024 · published 2026'
 
+# QGIS 3.30 moved geometry enums to Qgis; retain the declared 3.28 support.
+if Qgis.QGIS_VERSION_INT >= 33000:
+    GEOM_POINT = Qgis.GeometryType.Point
+    GEOM_LINE = Qgis.GeometryType.Line
+    GEOM_POLYGON = Qgis.GeometryType.Polygon
+else:
+    GEOM_POINT = QgsWkbTypes.GeometryType.PointGeometry
+    GEOM_LINE = QgsWkbTypes.GeometryType.LineGeometry
+    GEOM_POLYGON = QgsWkbTypes.GeometryType.PolygonGeometry
+
+# The QMetaType QgsField overload was introduced in QGIS 3.38.
+if Qgis.QGIS_VERSION_INT >= 33800:
+    FIELD_STRING = QMetaType.Type.QString
+    FIELD_DOUBLE = QMetaType.Type.Double
+    FIELD_INT = QMetaType.Type.Int
+else:
+    FIELD_STRING = QVariant.Type.String
+    FIELD_DOUBLE = QVariant.Type.Double
+    FIELD_INT = QVariant.Type.Int
+
 class AreaTool(QgsMapTool):
     def __init__(self, canvas, done):
         super().__init__(canvas)
         self.canvas, self.done, self.start = canvas, done, None
-        self.band = QgsRubberBand(canvas, QgsWkbTypes.PolygonGeometry)
+        self.band = QgsRubberBand(canvas, GEOM_POLYGON)
         self.band.setColor(QColor(35,154,129,90));self.band.setWidth(2)
     def canvasPressEvent(self, event):
         self.start = event.mapPoint()
@@ -40,13 +58,13 @@ class AreaTool(QgsMapTool):
         if rectangle.width()>0 and rectangle.height()>0:
             self.done(QgsGeometry.fromRect(rectangle), self.canvas.mapSettings().destinationCrs())
     def deactivate(self):
-        self.band.reset(QgsWkbTypes.PolygonGeometry)
+        self.band.reset(GEOM_POLYGON)
         super().deactivate()
 
 class ImportTask(QgsTask):
     message = pyqtSignal(str)
     def __init__(self, options, complete, status):
-        super().__init__('Prawdom_in: импорт области', QgsTask.CanCancel)
+        super().__init__('Prawdom_in: импорт области', QgsTask.Flag.CanCancel)
         self.options, self.complete, self.status = options, complete, status
         self.result, self.error = None, None
     def report(self, message):
@@ -113,11 +131,11 @@ def memory(kind,name,fields):
 
 def feature(layer,geom,attributes):
     if not geom or geom.isEmpty():return
-    if layer.geometryType()==QgsWkbTypes.PolygonGeometry:
-        if geom.type()!=QgsWkbTypes.PolygonGeometry:return
+    if layer.geometryType()==GEOM_POLYGON:
+        if geom.type()!=GEOM_POLYGON:return
         geom.convertToMultiType()
-    if layer.geometryType()==QgsWkbTypes.LineGeometry:
-        if geom.type()!=QgsWkbTypes.LineGeometry:return
+    if layer.geometryType()==GEOM_LINE:
+        if geom.type()!=GEOM_LINE:return
         geom.convertToMultiType()
     f=QgsFeature(layer.fields());f.setGeometry(geom);f.setAttributes(attributes);layer.dataProvider().addFeatures([f])
 
@@ -137,13 +155,13 @@ def save_result(result, options):
     transform=QgsCoordinateTransform(QgsCoordinateReferenceSystem('EPSG:4326'),crs,project)
     area=QgsGeometry.fromWkt(options['area']) if options['area'] else None
     if area:area.transform(transform);area=area.makeValid()
-    common=[('название',QVariant.String),('тип',QVariant.String),('OSM_ID',QVariant.String)]
+    common=[('название',FIELD_STRING),('тип',FIELD_STRING),('OSM_ID',FIELD_STRING)]
     layers={
-      'population':memory('Point','Население · Prawdom',[('адрес',QVariant.String),('жилая_площадь',QVariant.Double),('жители',QVariant.Int),('норма_м2',QVariant.Double),('источник',QVariant.String),('получено_UTC',QVariant.String)]),
+      'population':memory('Point','Население · Prawdom',[('адрес',FIELD_STRING),('жилая_площадь',FIELD_DOUBLE),('жители',FIELD_INT),('норма_м2',FIELD_DOUBLE),('источник',FIELD_STRING),('получено_UTC',FIELD_STRING)]),
       'food':memory('Point','Общепит',common), 'shops':memory('Point','Продуктовые магазины',common),
       'buildings':memory('MultiPolygon','Здания',common),'roads':memory('MultiLineString','Улицы',common),
       'greenery':memory('MultiPolygon','Озеленение',common),'water':memory('MultiPolygon','Водоёмы',common),
-      'area':memory('MultiPolygon','Область исследования',[('название',QVariant.String)])}
+      'area':memory('MultiPolygon','Область исследования',[('название',FIELD_STRING)])}
     excluded=0
     for row in result['rows']:
         point=QgsGeometry.fromPointXY(QgsPointXY(row['lon'],row['lat']));point.transform(transform)
@@ -168,7 +186,7 @@ def save_result(result, options):
             for kind in kinds:
                 g=QgsGeometry(geom)
                 if kind in ('food','shops'):
-                    if g.type()!=QgsWkbTypes.PointGeometry:g=g.pointOnSurface()
+                    if g.type()!=GEOM_POINT:g=g.pointOnSurface()
                     if area and not g.intersects(area):continue
                 elif area:g=g.intersection(area)
                 feature(layers[kind],g,[t.get('name',''),t.get('building',t.get('highway',t.get('amenity',t.get('shop','')))),record['type']+str(record['id'])])
@@ -182,10 +200,10 @@ def save_result(result, options):
     for key,layer in layers.items():
         if not layer.featureCount():continue
         layer.updateExtents();style(layer,key)
-        meta=layer.metadata();meta.setTitle(layer.name());meta.setAbstract('Prawdom_in 1.4.4.7. '+('Жилая площадь из публичных карточек prawdom.ru; жители = round(жилая_площадь / норма), не перепись. Ссылки и дата получения сохранены для каждого дома.' if key=='population' else '© OpenStreetMap contributors, ODbL. Область исследования задаётся пользователем и не является автоматически рассчитанной изохроной.'));layer.setMetadata(meta)
-        opt=QgsVectorFileWriter.SaveVectorOptions();opt.driverName='GPKG';opt.layerName=key;opt.actionOnExistingFile=QgsVectorFileWriter.CreateOrOverwriteFile if first else QgsVectorFileWriter.CreateOrOverwriteLayer
+        meta=layer.metadata();meta.setTitle(layer.name());meta.setAbstract('Prawdom_in 1.4.4.9. '+('Жилая площадь из публичных карточек prawdom.ru; жители = round(жилая_площадь / норма), не перепись. Ссылки и дата получения сохранены для каждого дома.' if key=='population' else '© OpenStreetMap contributors, ODbL. Область исследования задаётся пользователем и не является автоматически рассчитанной изохроной.'));layer.setMetadata(meta)
+        opt=QgsVectorFileWriter.SaveVectorOptions();opt.driverName='GPKG';opt.layerName=key;opt.actionOnExistingFile=QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteFile if first else QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
         answer=QgsVectorFileWriter.writeAsVectorFormatV3(layer,str(path),project.transformContext(),opt)
-        if answer[0]!=QgsVectorFileWriter.NoError:raise ValueError('Ошибка записи GeoPackage: '+str(answer))
+        if answer[0]!=QgsVectorFileWriter.WriterError.NoError:raise ValueError('Ошибка записи GeoPackage: '+str(answer))
         first=False
         q=QgsVectorLayer(str(path)+'|layername='+key,layer.name(),'ogr')
         if not q.isValid():raise ValueError('Не удалось открыть сохранённый слой '+layer.name())
@@ -198,7 +216,7 @@ def save_result(result, options):
     order=[saved[k] for k in ['population','food','shops','area','buildings','roads','greenery','water'] if k in saved]
     tree=project.layerTreeRoot();prior=tree.customLayerOrder() if tree.hasCustomLayerOrder() else tree.layerOrder()
     tree.setHasCustomLayerOrder(True);tree.setCustomLayerOrder(order+[layer for layer in prior if layer not in order])
-    report={'plugin':'Prawdom_in 1.4.4.7','created_at':datetime.now().astimezone().isoformat(),'norm_m2':options['norm'],'summary':counts,'messages':result['messages'],'gpkg':path.name,'method':'Жители = округлённая жилая площадь / норма по каждому дому. Подсчёт внутри выбранной области по координатам. Площадь не прошедших сопоставление домов не восстанавливается. Категории POI как в исходном задании; supermarket не включён.'}
+    report={'plugin':'Prawdom_in 1.4.4.9','created_at':datetime.now().astimezone().isoformat(),'norm_m2':options['norm'],'summary':counts,'messages':result['messages'],'gpkg':path.name,'method':'Жители = округлённая жилая площадь / норма по каждому дому. Подсчёт внутри выбранной области по координатам. Площадь не прошедших сопоставление домов не восстанавливается. Категории POI как в исходном задании; supermarket не включён.'}
     log=output/(stem+'_журнал.json');log.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     return saved,counts,str(path),str(log)
 
@@ -207,7 +225,7 @@ class ImportDialog(QDialog):
         super().__init__(iface.mainWindow());self.iface=iface;self.task=None;self.area=None;self.tool=None;self.old_tool=None
         self.setWindowTitle('Prawdom_in');self.resize(600,530)
         box=QVBoxLayout(self)
-        title=QLabel('Prawdom_in');title.setFont(QFont('Arial',20,QFont.Bold));box.addWidget(title)
+        title=QLabel('Prawdom_in');title.setFont(QFont('Arial',20,QFont.Weight.Bold));box.addWidget(title)
         box.addWidget(QLabel('Москва · импорт по выбранной области'))
         area_box=QGroupBox('1. Участок');row=QVBoxLayout(area_box);buttons=QHBoxLayout()
         for name,fn in [('Обвести рамкой',self.draw_area),('Выделенный полигон',self.selected_area),('Область окна',self.canvas_area)]:
@@ -218,20 +236,20 @@ class ImportDialog(QDialog):
         self.mode.toggled.connect(self.urls.setVisible)
         settings=QHBoxLayout();settings.addWidget(QLabel('Жилая площадь на человека:'));self.norm=QDoubleSpinBox();self.norm.setRange(1,100);self.norm.setValue(18);self.norm.setSuffix(' м²');settings.addWidget(self.norm);settings.addStretch();box.addLayout(settings)
         self.show_population=QCheckBox('Показывать точки домов поверх карты');box.addWidget(self.show_population)
-        pathrow=QHBoxLayout();base=QgsProject.instance().homePath() or QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        pathrow=QHBoxLayout();base=QgsProject.instance().homePath() or QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         self.output=QLineEdit(str(Path(base)/'Prawdom_in_данные'));pathrow.addWidget(self.output);pick=QPushButton('Папка…');pick.clicked.connect(self.choose_output);pathrow.addWidget(pick);box.addLayout(pathrow)
         self.status=QLabel('Готов к импорту');self.status.setWordWrap(True);box.addWidget(self.status)
         self.progress=QProgressBar();self.progress.setRange(0,100);box.addWidget(self.progress)
         bottom=QHBoxLayout();self.start_button=QPushButton('Импортировать');self.start_button.clicked.connect(self.start);bottom.addWidget(self.start_button);self.stop_button=QPushButton('Отмена');self.stop_button.clicked.connect(self.cancel);self.stop_button.setEnabled(False);bottom.addWidget(self.stop_button);about=QPushButton('О плагине');about.clicked.connect(self.about);bottom.addWidget(about);box.addLayout(bottom)
     def about(self):
-        QMessageBox.information(self,'О Prawdom_in','Prawdom_in · версия 1.4.4.7\n\nИмпорт жилой площади, координат и источников Prawdom.\nНаселение — оценка по норме 18 м², а не перепись.\n\nПользовательская подпись:\n'+CREDIT+'\n\nЛокальная сборка: 2026. ')
+        QMessageBox.information(self,'О Prawdom_in','Prawdom_in · версия 1.4.4.9\n\nИмпорт жилой площади, координат и источников Prawdom.\nНаселение — оценка по норме 18 м², а не перепись.\n\nПользовательская подпись:\n'+CREDIT+'\n\nЛокальная сборка: 2026. ')
     def choose_output(self):
         path=QFileDialog.getExistingDirectory(self,'Папка результатов',self.output.text())
         if path:self.output.setText(path)
     def set_area(self,g,crs):
         try:
             g=QgsGeometry(g);g.transform(QgsCoordinateTransform(crs,QgsCoordinateReferenceSystem('EPSG:4326'),QgsProject.instance()));g=g.makeValid()
-            if g.isEmpty() or g.type()!=QgsWkbTypes.PolygonGeometry:raise ValueError('Выберите полигональную область.')
+            if g.isEmpty() or g.type()!=GEOM_POLYGON:raise ValueError('Выберите полигональную область.')
             b=g.boundingBox();width=b.width()*111.32*math.cos(math.radians(b.center().y()));height=b.height()*111.32
             if width*height>25:raise ValueError('Выберите участок до 25 км², чтобы не перегружать источники.')
             self.area=g;self.area_label.setText(f'Область готова · примерно {width:.2f} × {height:.2f} км')
@@ -246,7 +264,7 @@ class ImportDialog(QDialog):
     def canvas_area(self):self.set_area(QgsGeometry.fromRect(self.iface.mapCanvas().extent()),self.iface.mapCanvas().mapSettings().destinationCrs())
     def selected_area(self):
         layer=self.iface.activeLayer()
-        if not isinstance(layer,QgsVectorLayer) or layer.geometryType()!=QgsWkbTypes.PolygonGeometry or not layer.selectedFeatureCount():
+        if not isinstance(layer,QgsVectorLayer) or layer.geometryType()!=GEOM_POLYGON or not layer.selectedFeatureCount():
             QMessageBox.information(self,'Выделенный полигон','Выделите один или несколько полигонов в активном слое.');return
         self.set_area(QgsGeometry.unaryUnion([f.geometry() for f in layer.getSelectedFeatures()]),layer.crs())
     def start(self):

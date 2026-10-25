@@ -2,7 +2,7 @@
 
 QGIS plugin for importing residential floor areas from public Prawdom house cards and map context from OpenStreetMap in a selected Moscow study area.
 
-Version: 1.4.4.7 · QGIS 3.28–3.99 · Python 3 · experimental.
+Version: 1.4.4.9 · QGIS 3.28–3.99 · Python 3 · experimental.
 
 Author/contact supplied for this release: Só-Sun Hui, corporate@k-a-d-o-d-e.com.
 
@@ -37,6 +37,8 @@ Tested with QGIS 3.42.1 on macOS: native ZIP installation and launch, empty-area
 Offline stress checks used 839 cached real cards, 10,000 duplicate URLs and 10,000 synthetic output rows. Verified clipping, multipolygon holes, persistent GeoPackage reopening and cancellation. These are not 10,000 live website requests. Other operating systems and QGIS versions have not yet been tested.
 
 Security hardening: XML DTD/entity declarations are rejected. HTTPS source hosts, paths and redirects are validated before connecting. Regression checks rejected DTD/XXE payloads and forbidden redirects, and parsed 12,244 elements from a cached real OSM response.
+
+Qt compatibility update (October 2026): scoped geometry, task, writer, font and standard-location enums; QAction imported from QtGui; QMetaType field definitions with older-QGIS fallbacks. QGIS 3.42.1 regression checks include dialog/action creation, area rubber band, task construction and persistent GeoPackage output. A Qt6/QGIS4 runtime has not been installed or tested; the declared supported range remains QGIS 3.28–3.99.
 
 ## License
 

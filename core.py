@@ -175,7 +175,7 @@ class Client:
                 connection = http.client.HTTPSConnection(target.hostname, timeout=40)
                 try:
                     resource = target.path + ('?' + target.query if target.query else '')
-                    connection.request('GET', resource, headers={'User-Agent': 'Prawdom_in/1.4.4.7 (local QGIS importer)'})
+                    connection.request('GET', resource, headers={'User-Agent': 'Prawdom_in/1.4.4.9 (local QGIS importer)'})
                     response = connection.getresponse()
                     if response.status in (301, 302, 303, 307, 308):
                         location = response.getheader('Location')
