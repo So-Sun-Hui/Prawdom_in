@@ -35,9 +35,9 @@ if Qgis.QGIS_VERSION_INT >= 33800:
     FIELD_DOUBLE = QMetaType.Type.Double
     FIELD_INT = QMetaType.Type.Int
 else:
-    FIELD_STRING = QVariant.Type.String
-    FIELD_DOUBLE = QVariant.Type.Double
-    FIELD_INT = QVariant.Type.Int
+    FIELD_STRING = QVariant.String
+    FIELD_DOUBLE = QVariant.Double
+    FIELD_INT = QVariant.Int
 
 class AreaTool(QgsMapTool):
     def __init__(self, canvas, done):
